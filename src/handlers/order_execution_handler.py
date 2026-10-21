@@ -25,6 +25,7 @@ from src.agents.risk.exposure_tracker import OpenPosition
 from src.execution.order_executor import OrderExecutor, OrderExecutionError
 from src.execution.position_manager import PositionManager
 from src.execution.websocket_broadcaster import WebSocketBroadcaster
+from src.agents.technical.config import MT5Config
 from src.agents.technical.mt5_client import MT5Client
 from src.models import TradeDecision
 from src.models.enums import (
@@ -250,6 +251,7 @@ async def execute_decision(
         
         if not risk_assessment.approved:
             result["error"] = risk_assessment.rejection_reason
+            result["rejected"] = True
             update_decision_status(decision_id, "rejected", error=result["error"])
             logger.warning(
                 f"Trade rejected for {decision.symbol}: "
@@ -316,12 +318,9 @@ async def run_order_execution(decisions: List[Dict]) -> Dict[str, Any]:
         Execution results
     """
     # Initialize components
-    credentials = get_mt5_credentials()
-    mt5_client = MT5Client(
-        login=credentials.get("login"),
-        password=credentials.get("password"),
-        server=credentials.get("server"),
-    )
+    # MT5Client loads {server, login, password} from Secrets Manager itself
+    mt5_config = MT5Config(credentials_secret_name=MT5_SECRETS_ARN) if MT5_SECRETS_ARN else None
+    mt5_client = MT5Client(config=mt5_config)
     
     websocket_broadcaster = WebSocketBroadcaster()
     position_manager = PositionManager(websocket_broadcaster=websocket_broadcaster)
@@ -384,7 +383,7 @@ async def run_order_execution(decisions: List[Dict]) -> Dict[str, Any]:
                         entry_price=result.get("filled_price", 0),
                     )
                 )
-            elif result.get("error", "").startswith("Trade rejected"):
+            elif result.get("rejected"):
                 results["rejected"] += 1
             else:
                 results["errors"] += 1

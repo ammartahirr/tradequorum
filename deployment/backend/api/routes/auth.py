@@ -1,6 +1,8 @@
 """Authentication endpoints (replaces Cognito)."""
+import hashlib
 from datetime import datetime, timedelta
 from typing import Optional
+from uuid import UUID, uuid4
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from fastapi.security import OAuth2PasswordBearer, OAuth2PasswordRequestForm
@@ -38,7 +40,7 @@ class UserCreate(BaseModel):
 
 
 class UserResponse(BaseModel):
-    id: str
+    id: UUID
     email: str
     full_name: Optional[str]
     role: str
@@ -56,6 +58,11 @@ def get_password_hash(password: str) -> str:
     return pwd_context.hash(password)
 
 
+def hash_refresh_token(token: str) -> str:
+    """Deterministic hash so refresh tokens can be looked up / revoked (bcrypt caps at 72 bytes)."""
+    return hashlib.sha256(token.encode()).hexdigest()
+
+
 def create_access_token(data: dict, expires_delta: Optional[timedelta] = None) -> str:
     to_encode = data.copy()
     expire = datetime.utcnow() + (expires_delta or timedelta(minutes=settings.JWT_ACCESS_TOKEN_EXPIRE_MINUTES))
@@ -66,7 +73,7 @@ def create_access_token(data: dict, expires_delta: Optional[timedelta] = None) -
 def create_refresh_token(data: dict) -> str:
     to_encode = data.copy()
     expire = datetime.utcnow() + timedelta(days=settings.JWT_REFRESH_TOKEN_EXPIRE_DAYS)
-    to_encode.update({"exp": expire, "type": "refresh"})
+    to_encode.update({"exp": expire, "type": "refresh", "jti": uuid4().hex})
     return jwt.encode(to_encode, settings.JWT_SECRET_KEY, algorithm=settings.JWT_ALGORITHM)
 
 
@@ -141,7 +148,7 @@ async def login(
     # Store refresh token
     token_record = RefreshToken(
         user_id=user.id,
-        token_hash=get_password_hash(refresh_token),
+        token_hash=hash_refresh_token(refresh_token),
         expires_at=datetime.utcnow() + timedelta(days=settings.JWT_REFRESH_TOKEN_EXPIRE_DAYS),
     )
     db.add(token_record)
@@ -161,6 +168,12 @@ async def refresh_token(refresh_token: str, db: AsyncSession = Depends(get_db)):
     except JWTError:
         raise HTTPException(status_code=401, detail="Invalid refresh token")
     
+    stored = (await db.execute(
+        select(RefreshToken).where(RefreshToken.token_hash == hash_refresh_token(refresh_token))
+    )).scalar_one_or_none()
+    if stored is None:
+        raise HTTPException(status_code=401, detail="Refresh token revoked or unknown")
+
     result = await db.execute(select(User).where(User.id == user_id))
     user = result.scalar_one_or_none()
     if not user or not user.is_active:
@@ -168,6 +181,15 @@ async def refresh_token(refresh_token: str, db: AsyncSession = Depends(get_db)):
     
     new_access_token = create_access_token(data={"sub": str(user.id), "email": user.email})
     new_refresh_token = create_refresh_token(data={"sub": str(user.id)})
+
+    # Rotate: old token is single-use
+    await db.delete(stored)
+    db.add(RefreshToken(
+        user_id=user.id,
+        token_hash=hash_refresh_token(new_refresh_token),
+        expires_at=datetime.utcnow() + timedelta(days=settings.JWT_REFRESH_TOKEN_EXPIRE_DAYS),
+    ))
+    await db.commit()
     
     return Token(access_token=new_access_token, refresh_token=new_refresh_token)
 

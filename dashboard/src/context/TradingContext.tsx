@@ -8,6 +8,8 @@ import type {
   WebSocketMessage,
 } from '../types/trading';
 import { useWebSocket, type ConnectionStatus } from '../hooks/useWebSocket';
+import { camelizeKeys } from '../utils/camelize';
+
 
 // State interface
 interface TradingState {
@@ -142,6 +144,8 @@ export function TradingProvider({ children, websocketUrl }: TradingProviderProps
   const handleMessage = useCallback((message: WebSocketMessage) => {
     // Record message receipt time for timing verification
     const receiptTime = performance.now();
+    // Accept both {payload} (dashboard contract) and legacy {data} envelopes
+    message = { ...message, payload: camelizeKeys(message.payload ?? message.data) };
     
     switch (message.type) {
       case 'trade_signal':
@@ -164,6 +168,12 @@ export function TradingProvider({ children, websocketUrl }: TradingProviderProps
         dispatch({ type: 'SET_PERFORMANCE_METRICS', payload: message.payload as PerformanceMetrics });
         break;
       
+      case 'pong':
+      case 'news_signal':
+      case 'technical_signal':
+      case 'risk_alert':
+        break; // informational – no state slice yet
+
       default:
         console.warn('Unknown message type:', message.type);
     }

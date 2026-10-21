@@ -4,7 +4,7 @@ Application configuration using Pydantic Settings.
 from functools import lru_cache
 from typing import List, Optional
 
-from pydantic_settings import BaseSettings
+from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
 class Settings(BaseSettings):
@@ -29,8 +29,8 @@ class Settings(BaseSettings):
     JWT_ACCESS_TOKEN_EXPIRE_MINUTES: int = 60
     JWT_REFRESH_TOKEN_EXPIRE_DAYS: int = 30
     
-    # CORS
-    CORS_ORIGINS: List[str] = ["http://localhost:3000", "http://localhost:5173"]
+    # CORS – comma-separated list or JSON list
+    CORS_ORIGINS: str = "http://localhost:3000,http://localhost:5173"
     
     # AWS Bedrock (for Claude Opus 4.5)
     AWS_ACCESS_KEY_ID: str = ""
@@ -41,7 +41,28 @@ class Settings(BaseSettings):
     # AWS SageMaker (for pattern recognition)
     SAGEMAKER_ENDPOINT: str = "ai-trading-pattern-recognition"
     
-    # MT5/Exness Trading
+    # Broker selection: "ibkr" (Interactive Brokers), "paper" (in-memory simulator), "mt5" (legacy)
+    BROKER: str = "paper"
+
+    # Interactive Brokers (IB Gateway / TWS). Paper gateway port = 4002 (TWS paper = 7497).
+    # In docker-compose the gateway container exposes paper on ib-gateway:4004.
+    IBKR_HOST: str = "127.0.0.1"
+    IBKR_PORT: int = 4002
+    IBKR_CLIENT_ID: int = 17
+    IBKR_ACCOUNT: str = ""
+    IBKR_MARKET_DATA_TYPE: int = 3  # 1=live (needs subscription), 3=delayed (free)
+    IBKR_READONLY: bool = False
+    IBKR_ALLOW_LIVE_TRADING: bool = False  # safety: orders only on paper (DU…) accounts
+
+    # Market data source for the sandbox/technical agent: "ibkr" | "yahoo" | "synthetic"
+    DEFAULT_DATA_SOURCE: str = "yahoo"
+    SANDBOX_MAX_BARS: int = 5000
+    SANDBOX_MAX_CONCURRENT: int = 2
+
+    # Background jobs (news scraping, technical analysis, position monitoring)
+    ENABLE_SCHEDULER: bool = True
+
+    # MT5/Exness Trading (legacy, Windows only)
     MT5_LOGIN: str = ""
     MT5_PASSWORD: str = ""
     MT5_SERVER: str = "Exness-MT5Real"
@@ -68,8 +89,8 @@ class Settings(BaseSettings):
     MAX_DAILY_LOSS_PCT: float = 0.05
     MAX_OPEN_POSITIONS: int = 10
     
-    # Trading Symbols
-    TRADING_SYMBOLS: str = "BTCUSD,ETHUSD,XAUUSD,EURUSD,GBPUSD"
+    # Trading Symbols (broker-neutral: stocks like AAPL, forex like EURUSD, BTCUSD, XAUUSD)
+    TRADING_SYMBOLS: str = "AAPL,MSFT,SPY,EURUSD,BTCUSD"
     
     # Scheduler
     NEWS_SCRAPE_INTERVAL_MINUTES: int = 5
@@ -83,13 +104,19 @@ class Settings(BaseSettings):
     ADMIN_PASSWORD: str = "change_this_secure_password"
     
     @property
+    def cors_origins_list(self) -> List[str]:
+        v = self.CORS_ORIGINS.strip()
+        if v.startswith("["):
+            import json
+            return [str(o) for o in json.loads(v)]
+        return [o.strip() for o in v.split(",") if o.strip()]
+
+    @property
     def trading_symbols_list(self) -> List[str]:
         """Get trading symbols as a list."""
-        return [s.strip() for s in self.TRADING_SYMBOLS.split(",")]
-    
-    class Config:
-        env_file = ".env"
-        case_sensitive = True
+        return [s.strip().upper() for s in self.TRADING_SYMBOLS.split(",") if s.strip()]
+
+    model_config = SettingsConfigDict(env_file=".env", case_sensitive=True, extra="ignore")
 
 
 @lru_cache()

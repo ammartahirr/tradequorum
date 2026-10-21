@@ -10,11 +10,11 @@ alembic==1.13.1
 
 # Redis
 redis==5.0.1
-aioredis==2.0.1
 
 # Authentication
 python-jose[cryptography]==3.3.0
 passlib[bcrypt]==1.7.4
+bcrypt==4.0.1  # passlib 1.7.4 breaks with bcrypt>=4.1
 pydantic-settings==2.1.0
 
 # AWS SDK for Bedrock and SageMaker
@@ -34,15 +34,14 @@ httpx==0.26.0
 
 # Validation
 pydantic==2.5.3
-email-validator==2.1.0
+email-validator==2.1.1
 
 # Logging
 structlog==24.1.0
 
-# Testing
-pytest==7.4.4
-pytest-asyncio==0.23.3
-httpx==0.26.0
+# Brokers / market data
+ib_async==2.1.0     # Interactive Brokers TWS / IB Gateway API
+yfinance==1.7.0     # free fallback historical data for the sandbox
 
 # MetaTrader5 (optional - only works on Windows)
 # MetaTrader5==5.0.45

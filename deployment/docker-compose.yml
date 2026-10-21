@@ -1,27 +1,30 @@
-version: '3.8'
+# TradeQuorum stack
+#
+#   cd deployment && cp .env.example .env   # fill in secrets
+#   docker compose up -d --build                       # paper simulator + Yahoo data
+#   docker compose --profile ibkr up -d --build        # + Interactive Brokers paper gateway
+#
+# Only nginx (port 80/443) is published. Postgres, Redis and the IB API port
+# stay on the private docker network.
 
 services:
-  # PostgreSQL Database
   postgres:
     image: timescale/timescaledb:latest-pg15
     container_name: trading-postgres
     restart: unless-stopped
     environment:
       POSTGRES_USER: trading
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-trading_secure_password}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}
       POSTGRES_DB: trading
     volumes:
       - postgres_data:/var/lib/postgresql/data
       - ./database/schema.sql:/docker-entrypoint-initdb.d/01-schema.sql:ro
-    ports:
-      - "5432:5432"
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U trading -d trading"]
       interval: 10s
       timeout: 5s
       retries: 5
 
-  # Redis for caching and pub/sub
   redis:
     image: redis:7-alpine
     container_name: trading-redis
@@ -29,73 +32,49 @@ services:
     command: redis-server --appendonly yes
     volumes:
       - redis_data:/data
-    ports:
-      - "6379:6379"
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
       interval: 10s
       timeout: 5s
       retries: 5
 
-  # FastAPI Backend
-  backend:
-    build:
-      context: .
-      dockerfile: Dockerfile.backend
-    container_name: trading-backend
+  # Interactive Brokers Gateway (paper). Start with: docker compose --profile ibkr up -d
+  # Image docs: https://github.com/gnzsnz/ib-gateway-docker
+  ib-gateway:
+    image: ghcr.io/gnzsnz/ib-gateway:stable
+    container_name: trading-ib-gateway
+    profiles: ["ibkr"]
     restart: unless-stopped
     environment:
-      # Database
-      - DATABASE_URL=postgresql+asyncpg://trading:${POSTGRES_PASSWORD:-trading_secure_password}@postgres:5432/trading
-      # Redis
-      - REDIS_URL=redis://redis:6379/0
-      # JWT
-      - JWT_SECRET_KEY=${JWT_SECRET_KEY:-change-this-in-production}
-      - JWT_ACCESS_TOKEN_EXPIRE_MINUTES=${JWT_ACCESS_TOKEN_EXPIRE_MINUTES:-60}
-      - JWT_REFRESH_TOKEN_EXPIRE_DAYS=${JWT_REFRESH_TOKEN_EXPIRE_DAYS:-30}
-      # AWS (Bedrock + SageMaker)
-      - AWS_ACCESS_KEY_ID=${AWS_ACCESS_KEY_ID}
-      - AWS_SECRET_ACCESS_KEY=${AWS_SECRET_ACCESS_KEY}
-      - AWS_REGION=${AWS_REGION:-us-east-1}
-      - BEDROCK_MODEL_ID=${BEDROCK_MODEL_ID:-anthropic.claude-opus-4-5-20250514}
-      - SAGEMAKER_ENDPOINT=${SAGEMAKER_ENDPOINT:-ai-trading-pattern-recognition}
-      # MT5/Exness
-      - MT5_LOGIN=${MT5_LOGIN}
-      - MT5_PASSWORD=${MT5_PASSWORD}
-      - MT5_SERVER=${MT5_SERVER:-Exness-MT5Real}
-      # News APIs
-      - REUTERS_API_KEY=${REUTERS_API_KEY}
-      - BLOOMBERG_API_KEY=${BLOOMBERG_API_KEY}
-      - TWITTER_API_KEY=${TWITTER_API_KEY}
-      - TWITTER_API_SECRET=${TWITTER_API_SECRET}
-      - TWITTER_BEARER_TOKEN=${TWITTER_BEARER_TOKEN}
-      - SEC_EDGAR_USER_AGENT=${SEC_EDGAR_USER_AGENT:-AI-Trading-System contact@example.com}
-      - NEWSAPI_KEY=${NEWSAPI_KEY}
-      - ALPHA_VANTAGE_API_KEY=${ALPHA_VANTAGE_API_KEY}
-      - FINNHUB_API_KEY=${FINNHUB_API_KEY}
-      - POLYGON_API_KEY=${POLYGON_API_KEY}
-      # Risk Limits
-      - MAX_POSITION_PCT=${MAX_POSITION_PCT:-0.05}
-      - MAX_PORTFOLIO_RISK_PCT=${MAX_PORTFOLIO_RISK_PCT:-0.02}
-      - MAX_CORRELATED_EXPOSURE=${MAX_CORRELATED_EXPOSURE:-0.20}
-      - MAX_DAILY_LOSS_PCT=${MAX_DAILY_LOSS_PCT:-0.05}
-      - MAX_OPEN_POSITIONS=${MAX_OPEN_POSITIONS:-10}
-      # Trading
-      - TRADING_SYMBOLS=${TRADING_SYMBOLS:-BTCUSD,ETHUSD,XAUUSD,EURUSD,GBPUSD}
-      # Scheduler
-      - NEWS_SCRAPE_INTERVAL_MINUTES=${NEWS_SCRAPE_INTERVAL_MINUTES:-5}
-      - TECHNICAL_ANALYSIS_INTERVAL_MINUTES=${TECHNICAL_ANALYSIS_INTERVAL_MINUTES:-1}
-      # Encryption & Admin
-      - ENCRYPTION_KEY=${ENCRYPTION_KEY}
-      - ADMIN_EMAIL=${ADMIN_EMAIL:-admin@example.com}
-      - ADMIN_PASSWORD=${ADMIN_PASSWORD}
-      # Debug
-      - DEBUG=${DEBUG:-false}
-      - LOG_LEVEL=${LOG_LEVEL:-INFO}
-    volumes:
-      - ../src:/app/src:ro  # Mount existing source code
-    ports:
-      - "8000:8000"
+      TWS_USERID: ${TWS_USERID:?set TWS_USERID in .env}
+      TWS_PASSWORD: ${TWS_PASSWORD:?set TWS_PASSWORD in .env}
+      TRADING_MODE: ${TRADING_MODE:-paper}
+      READ_ONLY_API: ${IBKR_READONLY_API:-no}
+      TWOFA_TIMEOUT_ACTION: restart
+      RELOGIN_AFTER_TWOFA_TIMEOUT: "yes"
+      EXISTING_SESSION_DETECTED_ACTION: primary
+      AUTO_RESTART_TIME: "11:59 PM"
+      TIME_ZONE: ${TIME_ZONE:-Etc/UTC}
+      VNC_SERVER_PASSWORD: ${VNC_SERVER_PASSWORD:-}
+    # Uncomment to watch the gateway login over VNC through an SSH tunnel
+    # ports:
+    #   - "127.0.0.1:5900:5900"
+
+  backend:
+    build:
+      context: ..
+      dockerfile: deployment/Dockerfile.backend
+    container_name: trading-backend
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      DATABASE_URL: postgresql+asyncpg://trading:${POSTGRES_PASSWORD}@postgres:5432/trading
+      REDIS_URL: redis://redis:6379/0
+      # Broker: "paper" (simulator) or "ibkr" (needs the ib-gateway profile)
+      BROKER: ${BROKER:-paper}
+      IBKR_HOST: ${IBKR_HOST:-ib-gateway}
+      IBKR_PORT: ${IBKR_PORT:-4004}   # gateway container: 4004 = paper, 4003 = live
+      DEFAULT_DATA_SOURCE: ${DEFAULT_DATA_SOURCE:-yahoo}
     depends_on:
       postgres:
         condition: service_healthy
@@ -107,37 +86,25 @@ services:
       timeout: 10s
       retries: 3
 
-  # React Dashboard (built and served by Nginx)
-  frontend:
+  # nginx serving the built dashboard + reverse proxy to the API
+  web:
     build:
-      context: ../dashboard
-      dockerfile: ../deployment/Dockerfile.frontend
-    container_name: trading-frontend
-    restart: unless-stopped
-    environment:
-      - VITE_API_URL=http://localhost/api
-      - VITE_WS_URL=ws://localhost/ws
-    volumes:
-      - frontend_build:/app/dist
-
-  # Nginx Reverse Proxy
-  nginx:
-    image: nginx:alpine
-    container_name: trading-nginx
+      context: ..
+      dockerfile: deployment/Dockerfile.frontend
+      args:
+        VITE_API_URL: ${VITE_API_URL:-/api}
+        VITE_WS_URL: ${VITE_WS_URL:-/ws}
+    container_name: trading-web
     restart: unless-stopped
     ports:
-      - "80:80"
-      - "443:443"
+      - "${HTTP_PORT:-80}:80"
+      - "${HTTPS_PORT:-443}:443"
     volumes:
-      - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro
-      - ./nginx/conf.d:/etc/nginx/conf.d:ro
-      - frontend_build:/usr/share/nginx/html:ro
-      - ./nginx/ssl:/etc/nginx/ssl:ro  # For SSL certificates
+      - ./nginx/ssl:/etc/nginx/ssl:ro
     depends_on:
       - backend
-      - frontend
     healthcheck:
-      test: ["CMD", "nginx", "-t"]
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1/api/health"]
       interval: 30s
       timeout: 10s
       retries: 3
@@ -145,7 +112,6 @@ services:
 volumes:
   postgres_data:
   redis_data:
-  frontend_build:
 
 networks:
   default:

@@ -14,5 +14,15 @@ module.exports = {
       'warn',
       { allowConstantExport: true },
     ],
+    '@typescript-eslint/no-unused-vars': ['error', { argsIgnorePattern: '^_', varsIgnorePattern: '^_' }],
   },
+  overrides: [
+    {
+      files: ['src/test/**', 'src/context/**'],
+      rules: {
+        '@typescript-eslint/no-this-alias': 'off',
+        'react-refresh/only-export-components': 'off',
+      },
+    },
+  ],
 }

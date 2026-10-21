@@ -1,6 +1,6 @@
 """Strategy Agent service."""
 import logging
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import Optional
 from uuid import UUID, uuid4
 
@@ -73,86 +73,104 @@ class StrategyService:
         tech: TechnicalSignal,
         db,
         horizon: str = "short_term",
-    ) -> TradeDecision:
-        """Evaluate a news/technical signal pair using the decision matrix."""
-        from src.agents.strategy.decision_matrix import evaluate_decision_matrix
-        from src.agents.strategy.stop_loss import calculate_stop_loss
-        from src.agents.strategy.take_profit import calculate_take_profit
-        
-        # Apply decision matrix
-        action, conviction = evaluate_decision_matrix(
-            sentiment=news.sentiment,
-            condition=tech.condition,
-            confluence_score=tech.confluence_score,
+    ) -> Optional[TradeDecision]:
+        """Evaluate a news/technical pair with the real src StrategyAgent."""
+        from src.agents.strategy.strategy_agent import StrategyAgent
+        from src.models.enums import (
+            ImpactType, MarketCondition, Sentiment, TradeAction, TradingHorizon, TrendDirection,
         )
-        
-        # Skip if no trade
-        if action == "no_trade":
-            logger.info(f"No trade for {news.symbol}: conflicting signals")
-            return None
-        
-        # Calculate entry, stop-loss, take-profit
-        entry_price = tech.current_price
-        
-        support_levels = [s["level"] for s in tech.support_levels]
-        resistance_levels = [r["level"] for r in tech.resistance_levels]
-        
-        stop_loss = calculate_stop_loss(
-            action=action,
-            entry_price=entry_price,
-            support_levels=support_levels,
-            resistance_levels=resistance_levels,
-            horizon=horizon,
+        from src.models.signals import (
+            ConfluenceResult, NewsSignal as NewsSignalModel,
+            SupportResistance, TechnicalSignal as TechnicalSignalModel,
         )
-        
-        take_profit = calculate_take_profit(
-            action=action,
-            entry_price=entry_price,
-            stop_loss=stop_loss,
-            support_levels=support_levels,
-            resistance_levels=resistance_levels,
-            horizon=horizon,
-        )
-        
-        # Calculate risk-reward ratio
-        risk = abs(entry_price - stop_loss)
-        reward = abs(take_profit - entry_price)
-        risk_reward_ratio = reward / risk if risk > 0 else 0
-        
-        # Validate minimum risk-reward
-        if risk_reward_ratio < 1.5:
-            logger.info(f"Skipping {news.symbol}: risk-reward {risk_reward_ratio:.2f} < 1.5")
-            return None
-        
-        # Calculate position size based on conviction
-        position_size_pct = self._calculate_position_size(conviction, risk_reward_ratio)
-        
-        # Create decision
-        decision = TradeDecision(
-            decision_id=uuid4(),
+
+        def aware(dt: datetime) -> datetime:
+            return dt if dt.tzinfo else dt.replace(tzinfo=timezone.utc)
+
+        def levels(raw) -> list:
+            out = []
+            for lv in raw or []:
+                try:
+                    out.append(SupportResistance(
+                        level=float(lv["level"]),
+                        strength=float(lv.get("strength", 0.5)),
+                        timeframe=str(lv.get("timeframe", "1y")),
+                        last_tested=aware(datetime.fromisoformat(lv["last_tested"]))
+                        if lv.get("last_tested") else datetime.now(timezone.utc),
+                    ))
+                except (KeyError, ValueError, TypeError):
+                    continue
+            return out
+
+        news_model = NewsSignalModel(
             symbol=news.symbol,
-            action=action,
-            conviction=conviction,
-            horizon=horizon,
-            entry_price=entry_price,
-            stop_loss=stop_loss,
-            take_profit=take_profit,
-            position_size_pct=position_size_pct,
-            risk_reward_ratio=risk_reward_ratio,
-            reasoning=f"News: {news.sentiment}, Tech: {tech.condition}, Confluence: {tech.confluence_score:.2f}",
-            news_signal_id=news.signal_id,
-            technical_signal_id=tech.signal_id,
-            timestamp=datetime.utcnow(),
-            expires_at=datetime.utcnow() + timedelta(hours=4),
+            sentiment=Sentiment(news.sentiment),
+            impact_type=ImpactType(news.impact_type),
+            impact_score=float(news.impact_score),
+            confidence=float(news.confidence),
+            reasoning=news.reasoning,
+            source_items=list(news.source_items or []),
+            timestamp=aware(news.timestamp),
+            expires_at=aware(news.expires_at),
         )
-        
-        # Mark signals as consumed
+        tech_model = TechnicalSignalModel(
+            symbol=tech.symbol,
+            trend=TrendDirection(tech.trend),
+            condition=MarketCondition(tech.condition),
+            rsi=float(tech.rsi),
+            current_price=float(tech.current_price),
+            support_levels=levels(tech.support_levels),
+            resistance_levels=levels(tech.resistance_levels),
+            confluence=ConfluenceResult(
+                score=min(1.0, float(tech.confluence_score)),
+                factors=list(tech.confluence_factors or []),
+                description=tech.confluence_description or "",
+            ),
+            volume_trend=tech.volume_trend,
+            interest_rate_impact=float(tech.interest_rate_impact or 0.0),
+            timestamp=aware(tech.timestamp),
+        )
+
+        class _NoPersist:
+            async def persist_decision(self, *a, **k):
+                return None
+
+        agent = StrategyAgent(persistence=_NoPersist())
+        result = await agent.evaluate(
+            news_signal=news_model,
+            technical_signal=tech_model,
+            horizon=TradingHorizon(horizon),
+        )
         news.consumed_by = "strategy_agent"
         tech.consumed_by = "strategy_agent"
-        
+
+        if not result.success or result.decision is None:
+            logger.info(f"No decision for {news.symbol}: {result.error_message}")
+            return None
+        d = result.decision
+        if d.action not in {TradeAction.BUY, TradeAction.STRONG_BUY, TradeAction.SELL, TradeAction.STRONG_SELL}:
+            logger.info(f"{news.symbol}: {d.action.value} – not actionable")
+            return None
+
+        decision = TradeDecision(
+            decision_id=uuid4(),
+            symbol=d.symbol,
+            action=d.action.value,
+            conviction=d.conviction.value,
+            horizon=d.horizon.value,
+            entry_price=d.entry_price,
+            stop_loss=d.stop_loss,
+            take_profit=d.take_profit,
+            position_size_pct=min(d.position_size_pct, settings.MAX_POSITION_PCT),
+            risk_reward_ratio=d.risk_reward_ratio,
+            reasoning=d.reasoning,
+            news_signal_id=news.signal_id,
+            technical_signal_id=tech.signal_id,
+            timestamp=d.timestamp,
+            expires_at=d.expires_at,
+        )
         db.add(decision)
-        
-        # Broadcast decision
+
         await broadcast_decision({
             "decision_id": str(decision.decision_id),
             "symbol": decision.symbol,
@@ -162,27 +180,10 @@ class StrategyService:
             "stop_loss": decision.stop_loss,
             "take_profit": decision.take_profit,
             "risk_reward_ratio": decision.risk_reward_ratio,
+            "reasoning": decision.reasoning,
         })
-        
         return decision
-    
-    def _calculate_position_size(self, conviction: str, risk_reward: float) -> float:
-        """Calculate position size based on conviction and risk-reward."""
-        base_size = {
-            "high": 0.04,
-            "medium": 0.025,
-            "low": 0.01,
-        }.get(conviction, 0.01)
-        
-        # Adjust based on risk-reward
-        if risk_reward >= 3.0:
-            base_size *= 1.2
-        elif risk_reward < 2.0:
-            base_size *= 0.8
-        
-        # Cap at max position size
-        return min(base_size, settings.MAX_POSITION_PCT)
-    
+
     async def get_performance(self, period: str = "30d") -> dict:
         """Get strategy performance metrics."""
         from sqlalchemy import func
@@ -223,13 +224,10 @@ class StrategyService:
             }
     
     async def backtest(self, symbol: str, start_date: datetime, end_date: datetime) -> dict:
-        """Run backtest for a symbol over a date range."""
-        # This would integrate with the existing backtest logic
-        # For now, return placeholder
-        return {
-            "symbol": symbol,
-            "start_date": start_date.isoformat(),
-            "end_date": end_date.isoformat(),
-            "status": "not_implemented",
-            "message": "Backtest functionality requires historical data integration",
-        }
+        """Run the sandbox backtest on daily bars covering [start_date, end_date]."""
+        from services.sandbox_service import SandboxRequest, run_sandbox
+
+        days = max(300, (end_date - start_date).days)
+        result = await run_sandbox(SandboxRequest(symbol=symbol, timeframe="D1", bars=days))
+        result.pop("candles", None)
+        return result

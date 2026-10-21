@@ -20,6 +20,7 @@ import uuid
 from datetime import datetime, timezone
 from typing import Optional, Callable, Any
 
+from src.brokers.base import BrokerClient
 from src.models.enums import TradeAction
 from src.models.trading import TradeDecision, OrderResult
 
@@ -64,6 +65,7 @@ class OrderExecutor:
         mt5_client: Any = None,
         websocket_broadcaster: Any = None,
         trade_persistence: Any = None,
+        broker: Optional[BrokerClient] = None,
     ):
         """
         Initialize the Order Executor.
@@ -78,6 +80,41 @@ class OrderExecutor:
         self._mt5_client = mt5_client
         self._websocket_broadcaster = websocket_broadcaster
         self._trade_persistence = trade_persistence
+        # Broker-neutral path (Interactive Brokers, PaperBroker). For brokers,
+        # ``size`` passed to place_order is a NOTIONAL amount in account currency.
+        self._broker = broker if broker is not None else (
+            mt5_client if isinstance(mt5_client, BrokerClient) else None
+        )
+
+    async def _execute_order_broker(self, decision: TradeDecision, size: float) -> OrderResult:
+        """Execute a market bracket order through a ``BrokerClient``."""
+        buy_actions = {TradeAction.STRONG_BUY, TradeAction.BUY}
+        side = "BUY" if decision.action in buy_actions else "SELL"
+        quantity = size / decision.entry_price
+        result = await self._broker.place_bracket_order(
+            symbol=decision.symbol,
+            side=side,
+            quantity=quantity,
+            stop_loss=decision.stop_loss,
+            take_profit=decision.take_profit,
+            reference=f"tq-{decision.action.value}",
+        )
+        if result.status == "rejected":
+            raise OrderExecutionError(f"Broker rejected order: {result.message}")
+        status = "filled" if result.status == "filled" else "partial"
+        if result.status == "pending":
+            logger.warning(
+                f"Order {result.order_id} for {decision.symbol} accepted but not yet filled "
+                f"({result.message}); recording as partial"
+            )
+        return OrderResult(
+            order_id=result.order_id,
+            symbol=decision.symbol,
+            status=status,
+            filled_price=result.avg_fill_price or decision.entry_price,
+            filled_quantity=result.filled_quantity,
+            timestamp=result.timestamp,
+        )
     
     def _validate_trade_decision(self, decision: TradeDecision, size: float) -> None:
         """
@@ -145,11 +182,12 @@ class OrderExecutor:
         Returns:
             Position info if exists, None otherwise.
         """
-        if self._mt5_client is None:
+        client = self._broker or self._mt5_client
+        if client is None:
             return None
         
         try:
-            positions = await self._mt5_client.get_open_positions()
+            positions = await client.get_open_positions()
             for pos in positions:
                 if pos.get("symbol") == symbol:
                     return pos
@@ -176,6 +214,9 @@ class OrderExecutor:
         Raises:
             OrderExecutionError: If execution fails.
         """
+        if self._broker is not None:
+            return await self._execute_order_broker(decision, size)
+
         if self._mt5_client is None:
             # Mock execution for testing
             return OrderResult(
@@ -340,6 +381,11 @@ class OrderExecutor:
         Returns:
             True if modification successful.
         """
+        if self._broker is not None:
+            return await self._broker.modify_protective_orders(
+                order_id, stop_loss=stop_loss, take_profit=take_profit
+            )
+
         if self._mt5_client is None:
             return True  # Mock success for testing
         
@@ -370,16 +416,29 @@ class OrderExecutor:
         
         return True
     
-    async def close_position(self, order_id: str) -> OrderResult:
+    async def close_position(self, order_id: str, symbol: Optional[str] = None) -> OrderResult:
         """
         Close an open position.
         
         Args:
-            order_id: The order/position ID to close.
+            order_id: The order/position ID to close (MT5 ticket).
+            symbol: Symbol to flatten (required for broker-neutral clients such as IBKR,
+                which close by instrument rather than ticket).
             
         Returns:
             OrderResult with close details.
         """
+        if self._broker is not None:
+            res = await self._broker.close_position(symbol or order_id)
+            return OrderResult(
+                order_id=res.order_id,
+                symbol=res.symbol,
+                status="filled" if res.status == "filled" else "partial",
+                filled_price=res.avg_fill_price,
+                filled_quantity=res.filled_quantity,
+                timestamp=res.timestamp,
+            )
+
         if self._mt5_client is None:
             # Mock close for testing
             return OrderResult(
@@ -443,6 +502,9 @@ class OrderExecutor:
         Returns:
             List of open position dictionaries.
         """
+        if self._broker is not None:
+            return await self._broker.get_open_positions()
+
         if self._mt5_client is None:
             return []
         
@@ -455,6 +517,9 @@ class OrderExecutor:
         Returns:
             Dictionary with account info.
         """
+        if self._broker is not None:
+            return await self._broker.get_account_info()
+
         if self._mt5_client is None:
             return {
                 "balance": 100000.0,

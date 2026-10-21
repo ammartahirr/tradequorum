@@ -12,7 +12,7 @@ license = {text = "MIT"}
 authors = [
     {name = "AI Trading Team"}
 ]
-keywords = ["trading", "ai", "agents", "mt5", "exness"]
+keywords = ["trading", "ai", "agents", "interactive-brokers", "backtesting"]
 classifiers = [
     "Development Status :: 3 - Alpha",
     "Intended Audience :: Financial and Insurance Industry",
@@ -31,17 +31,17 @@ dependencies = [
     "pandas>=2.1.0",
     "numpy>=1.26.0",
     
-    # Technical analysis
-    "TA-Lib>=0.4.28",
-    
-    # MetaTrader 5 API
-    "MetaTrader5>=5.0.45",
-    
     # Data validation
     "pydantic>=2.5.0",
+
+    # Brokers / market data
+    "ib_async>=2.1.0",   # Interactive Brokers (TWS / IB Gateway)
+    "yfinance>=0.2.40",  # free historical data for the sandbox
 ]
 
 [project.optional-dependencies]
+# Legacy Exness/MT5 connector – Windows only
+mt5 = ["MetaTrader5>=5.0.45; sys_platform == 'win32'"]
 dev = [
     # Testing
     "pytest>=7.4.0",
