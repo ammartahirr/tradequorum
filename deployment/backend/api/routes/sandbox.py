@@ -1,6 +1,6 @@
 """Training sandbox API – backtest the bot on historical candles (no real orders)."""
 import logging
-from typing import Literal, Optional
+from typing import Any, Literal, Optional
 
 from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel, Field
@@ -16,7 +16,24 @@ router = APIRouter()
 DataSource = Literal["ibkr", "yahoo", "synthetic"]
 
 
+class QuantParams(BaseModel):
+    """Optional overrides for the quant engine (see src/quant/engine.py QuantConfig)."""
+    use_meta_model: Optional[bool] = None
+    entry_threshold: Optional[float] = Field(None, ge=0.05, le=0.9)
+    sl_atr: Optional[float] = Field(None, gt=0.2, le=10)
+    tp_atr: Optional[float] = Field(None, gt=0.2, le=20)
+    trail_atr: Optional[float] = Field(None, gt=0.2, le=10)
+    max_risk_per_trade: Optional[float] = Field(None, gt=0, le=0.05)
+    base_risk: Optional[float] = Field(None, gt=0, le=0.05)
+    commission_bps: Optional[float] = Field(None, ge=0, le=100)
+    slippage_bps: Optional[float] = Field(None, ge=0, le=100)
+    trend_filter: Optional[bool] = None
+    target_vol: Optional[float] = Field(None, gt=0, le=2)
+
+
 class BacktestBody(BaseModel):
+    engine: Literal["quant", "classic"] = "quant"
+    quant: Optional[QuantParams] = None
     symbol: str = Field(..., min_length=1, max_length=20, examples=["AAPL"])
     timeframe: str = Field("D1", description=f"One of {SUPPORTED_TIMEFRAMES}")
     bars: int = Field(1000, ge=250, le=20000)
@@ -76,9 +93,33 @@ async def backtest(body: BacktestBody):
     """
     data = body.model_dump()
     data["timeframe"] = _check_timeframe(body.timeframe)
+    data["quant"] = body.quant.model_dump(exclude_none=True) if body.quant else None
     try:
         return await run_sandbox(SandboxRequest(**data))
     except BrokerError as e:
         raise HTTPException(502, str(e))
     except ValueError as e:
+        raise HTTPException(400, str(e))
+
+
+class PortfolioBody(BaseModel):
+    symbols: list[str] = Field(..., min_length=2, max_length=20)
+    timeframe: str = "D1"
+    bars: int = Field(2000, ge=400, le=20000)
+    source: Optional[DataSource] = None
+    initial_capital: float = Field(100000.0, gt=0)
+    quant: Optional[QuantParams] = None
+
+
+@router.post("/portfolio")
+async def portfolio(body: PortfolioBody) -> dict[str, Any]:
+    """Quant engine on several symbols with an equal risk budget each (diversification test)."""
+    from services.quant_service import portfolio_backtest
+
+    tf = _check_timeframe(body.timeframe)
+    overrides = body.quant.model_dump(exclude_none=True) if body.quant else {}
+    overrides["initial_capital"] = body.initial_capital
+    try:
+        return await portfolio_backtest([s.upper() for s in body.symbols], tf, body.bars, body.source, overrides)
+    except (BrokerError, ValueError) as e:
         raise HTTPException(400, str(e))

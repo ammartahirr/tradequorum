@@ -39,6 +39,9 @@ email-validator==2.1.1
 # Logging
 structlog==24.1.0
 
+# Machine learning (quant engine meta-model)
+scikit-learn==1.5.2
+
 # Brokers / market data
 ib_async==2.1.0     # Interactive Brokers TWS / IB Gateway API
 yfinance==1.7.0     # free fallback historical data for the sandbox

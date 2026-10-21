@@ -27,6 +27,7 @@ from api.routes import (  # noqa: E402
     news_router,
     orders_router,
     positions_router,
+    quant_router,
     risk_router,
     sandbox_router,
     signals_router,
@@ -85,6 +86,7 @@ app.include_router(positions_router, prefix="/api/positions", tags=["Position Ma
 app.include_router(signals_router, prefix="/api/signals", tags=["Signals"])
 app.include_router(broker_router, prefix="/api/broker", tags=["Broker"])
 app.include_router(sandbox_router, prefix="/api/sandbox", tags=["Training Sandbox"])
+app.include_router(quant_router, prefix="/api/quant", tags=["Quant Engine"])
 
 
 @app.websocket("/ws")

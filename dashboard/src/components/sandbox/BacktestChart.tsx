@@ -2,6 +2,7 @@ import { useEffect, useRef } from 'react';
 import {
   CandlestickSeries,
   ColorType,
+  HistogramSeries,
   LineSeries,
   LineStyle,
   createChart,
@@ -15,19 +16,38 @@ import {
   type UTCTimestamp,
 } from 'lightweight-charts';
 import { useTheme } from '../../context/ThemeContext';
-import type { Candle, SandboxTrade } from '../../api/sandbox';
+import type { Candle } from '../../api/sandbox';
+import { REGIME_COLORS } from './format';
+
+/** Minimal trade shape shared by the classic and quant engines. */
+export interface ChartTrade {
+  side: 'long' | 'short';
+  entry_ts: number;
+  exit_ts: number;
+  entry_price: number;
+  exit_price: number;
+  stop_loss: number;
+  take_profit: number;
+  final_stop?: number;
+  pnl: number;
+  exit_reason: string;
+}
+
 
 interface Props {
   candles: Candle[];
-  trades: SandboxTrade[];
+  trades: ChartTrade[];
   selectedIndex: number | null;
   onSelectTrade?: (index: number) => void;
   height?: number;
+  regimes?: { from: number; to: number; regime: string }[];
+  composite?: { time: number; value: number }[];
+  entryThreshold?: number;
 }
 
 const ts = (t: number) => t as UTCTimestamp;
 
-function buildMarkers(trades: SandboxTrade[], win: string, loss: string, neutral: string) {
+function buildMarkers(trades: ChartTrade[], win: string, loss: string, neutral: string) {
   const markers: SeriesMarker<Time>[] = [];
   trades.forEach((t, i) => {
     const long = t.side === 'long';
@@ -51,13 +71,25 @@ function buildMarkers(trades: SandboxTrade[], win: string, loss: string, neutral
   return markers.sort((a, b) => (a.time as number) - (b.time as number));
 }
 
-export function BacktestChart({ candles, trades, selectedIndex, onSelectTrade, height = 520 }: Props) {
+export function BacktestChart({
+  candles,
+  trades,
+  selectedIndex,
+  onSelectTrade,
+  height = 520,
+  regimes,
+  composite,
+  entryThreshold,
+}: Props) {
   const { colors } = useTheme();
   const containerRef = useRef<HTMLDivElement>(null);
   const chartRef = useRef<IChartApi | null>(null);
   const seriesRef = useRef<ISeriesApi<'Candlestick'> | null>(null);
   const tradeLineRef = useRef<ISeriesApi<'Line'> | null>(null);
   const markersRef = useRef<ISeriesMarkersPluginApi<Time> | null>(null);
+  const regimeRef = useRef<ISeriesApi<'Histogram'> | null>(null);
+  const compositeRef = useRef<ISeriesApi<'Line'> | null>(null);
+  const hasSignalPane = Boolean(composite && composite.length);
   const priceLinesRef = useRef<IPriceLine[]>([]);
 
   // Create chart once per theme
@@ -65,7 +97,7 @@ export function BacktestChart({ candles, trades, selectedIndex, onSelectTrade, h
     if (!containerRef.current) return;
     const chart = createChart(containerRef.current, {
       autoSize: true,
-      height,
+      height: hasSignalPane ? Math.round(height * 1.22) : height,
       layout: {
         background: { type: ColorType.Solid, color: colors.bgSecondary },
         textColor: colors.textSecondary,
@@ -79,6 +111,15 @@ export function BacktestChart({ candles, trades, selectedIndex, onSelectTrade, h
       timeScale: { borderColor: colors.border, timeVisible: true, secondsVisible: false },
       crosshair: { mode: 0 },
     });
+    // Regime shading: full-height histogram on its own hidden scale, drawn behind candles
+    const regimeSeries = chart.addSeries(HistogramSeries, {
+      priceScaleId: 'regime',
+      priceLineVisible: false,
+      lastValueVisible: false,
+      base: 0,
+    });
+    chart.priceScale('regime').applyOptions({ scaleMargins: { top: 0, bottom: 0 }, visible: false });
+    regimeRef.current = regimeSeries;
     const series = chart.addSeries(CandlestickSeries, {
       upColor: colors.success,
       downColor: colors.error,
@@ -94,6 +135,16 @@ export function BacktestChart({ candles, trades, selectedIndex, onSelectTrade, h
       lastValueVisible: false,
       crosshairMarkerVisible: false,
     });
+    if (hasSignalPane) {
+      const comp = chart.addSeries(
+        LineSeries,
+        { color: colors.info, lineWidth: 1, priceLineVisible: false, lastValueVisible: true, title: 'signal' },
+        1,
+      );
+      compositeRef.current = comp;
+      const panes = chart.panes();
+      if (panes[1]) panes[1].setHeight(Math.round(height * 0.22));
+    }
     chartRef.current = chart;
     seriesRef.current = series;
     tradeLineRef.current = tradeLine;
@@ -105,9 +156,39 @@ export function BacktestChart({ candles, trades, selectedIndex, onSelectTrade, h
       seriesRef.current = null;
       tradeLineRef.current = null;
       markersRef.current = null;
+      regimeRef.current = null;
+      compositeRef.current = null;
       priceLinesRef.current = [];
     };
-  }, [colors, height]);
+  }, [colors, height, hasSignalPane]);
+
+  // Regime shading + ensemble signal pane
+  useEffect(() => {
+    const reg = regimeRef.current;
+    if (reg) {
+      if (!regimes || regimes.length === 0) {
+        reg.setData([]);
+      } else {
+        let k = 0;
+        reg.setData(
+          candles.map((c) => {
+            while (k < regimes.length - 1 && c.time > regimes[k].to) k++;
+            const r = regimes[k];
+            const inside = r && c.time >= r.from && c.time <= r.to;
+            return { time: ts(c.time), value: 1, color: inside ? REGIME_COLORS[r.regime] ?? 'rgba(0,0,0,0)' : 'rgba(0,0,0,0)' };
+          }),
+        );
+      }
+    }
+    const comp = compositeRef.current;
+    if (comp && composite) {
+      comp.setData(composite.map((p) => ({ time: ts(p.time), value: p.value })));
+      if (entryThreshold) {
+        comp.createPriceLine({ price: entryThreshold, color: colors.success, lineWidth: 1, lineStyle: LineStyle.Dashed, axisLabelVisible: false, title: 'long' });
+        comp.createPriceLine({ price: -entryThreshold, color: colors.error, lineWidth: 1, lineStyle: LineStyle.Dashed, axisLabelVisible: false, title: 'short' });
+      }
+    }
+  }, [candles, regimes, composite, entryThreshold, colors, hasSignalPane]);
 
   // Data + markers
   useEffect(() => {
@@ -152,6 +233,9 @@ export function BacktestChart({ candles, trades, selectedIndex, onSelectTrade, h
       line(t.entry_price, colors.textPrimary, `Entry #${selectedIndex + 1}`, LineStyle.Solid),
       line(t.stop_loss, colors.error, 'SL'),
       line(t.take_profit, colors.success, 'TP'),
+      ...(t.final_stop !== undefined && Math.abs(t.final_stop - t.stop_loss) > 1e-9
+        ? [line(t.final_stop, colors.warning, 'final stop', LineStyle.Dotted)]
+        : []),
     ];
     if (t.exit_ts > t.entry_ts) {
       tradeLine.setData([
@@ -175,7 +259,7 @@ export function BacktestChart({ candles, trades, selectedIndex, onSelectTrade, h
     <div
       ref={containerRef}
       data-testid="backtest-chart"
-      style={{ width: '100%', height, border: `1px solid ${colors.border}`, borderRadius: 12, overflow: 'hidden' }}
+      style={{ width: '100%', height: hasSignalPane ? Math.round(height * 1.22) : height, border: `1px solid ${colors.border}`, borderRadius: 12, overflow: 'hidden' }}
     />
   );
 }

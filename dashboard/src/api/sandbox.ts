@@ -67,6 +67,7 @@ export interface SandboxStats {
 }
 
 export interface SandboxResult {
+  engine: 'classic';
   symbol: string;
   timeframe: string;
   source: DataSource;
@@ -83,7 +84,119 @@ export interface SandboxResult {
   elapsed_ms: number;
 }
 
+export type Engine = 'quant' | 'classic';
+
+export interface QuantParams {
+  use_meta_model?: boolean;
+  entry_threshold?: number;
+  sl_atr?: number;
+  tp_atr?: number;
+  trail_atr?: number;
+  max_risk_per_trade?: number;
+  base_risk?: number;
+  commission_bps?: number;
+  slippage_bps?: number;
+  trend_filter?: boolean;
+}
+
+export interface QuantStats {
+  total_return_pct: number;
+  cagr_pct: number;
+  ann_vol_pct: number;
+  sharpe: number;
+  sortino: number;
+  calmar: number;
+  psr: number;
+  max_drawdown_pct: number;
+  buy_and_hold_pct: number;
+  total_trades: number;
+  long_trades: number;
+  short_trades: number;
+  win_rate: number;
+  profit_factor: number;
+  avg_r: number;
+  expectancy: number;
+  avg_bars_held: number;
+  exposure_pct: number;
+  exit_reasons: Record<string, number>;
+  monte_carlo: {
+    runs?: number;
+    return_p5?: number;
+    return_p50?: number;
+    return_p95?: number;
+    max_dd_p50?: number;
+    max_dd_p95?: number;
+    prob_loss?: number;
+  };
+}
+
+export interface QuantTrade {
+  side: 'long' | 'short';
+  action: 'buy' | 'sell';
+  entry_ts: number;
+  exit_ts: number;
+  entry_time: string;
+  exit_time: string;
+  entry_price: number;
+  exit_price: number;
+  stop_loss: number;
+  take_profit: number;
+  final_stop: number;
+  quantity: number;
+  risk_amount: number;
+  pnl: number;
+  pnl_pct: number;
+  r_multiple: number;
+  exit_reason: string;
+  prob: number | null;
+  model_trusted: boolean;
+  regime: string;
+  composite: number;
+  alpha_contrib: Record<string, number>;
+  bars_held: number;
+}
+
+export interface QuantResult {
+  engine: 'quant_v2';
+  symbol: string;
+  timeframe: string;
+  source: DataSource;
+  bars: number;
+  warmup_bars: number;
+  first_bar: string;
+  last_bar: string;
+  elapsed_ms: number;
+  stats: QuantStats;
+  meta_model_enabled: boolean;
+  comparison_label: string;
+  comparison_stats: QuantStats | null;
+  meta_model: {
+    events: number;
+    oos_events: number;
+    trusted_events: number;
+    trust_rule: string;
+    n_refits: number;
+    filtered: Record<string, number>;
+    auc?: number | null;
+    brier?: number | null;
+    base_rate?: number | null;
+    precision_taken?: number | null;
+    top_features?: { feature: string; weight: number }[];
+  };
+  regime_stats: Record<string, { trades: number; win_rate: number; avg_r: number; pnl: number }>;
+  alpha_sharpe: Record<string, number | null>;
+  regimes: { from: number; to: number; regime: string }[];
+  composite: { time: number; value: number }[];
+  equity_curve: { time: number; equity: number }[];
+  comparison_equity_curve: { time: number; equity: number }[];
+  trades: QuantTrade[];
+  candles: Candle[];
+  config: Record<string, unknown>;
+}
+
 export interface SandboxRequest {
+  engine?: Engine;
+  quant?: QuantParams;
   symbol: string;
   timeframe: string;
   bars: number;
@@ -140,5 +253,5 @@ export const sandboxApi = {
   config: () => request<SandboxConfig>('/sandbox/config'),
   brokerStatus: () => request<BrokerStatus>('/broker/status'),
   backtest: (req: SandboxRequest) =>
-    request<SandboxResult>('/sandbox/backtest', { method: 'POST', body: JSON.stringify(req) }),
+    request<SandboxResult | QuantResult>('/sandbox/backtest', { method: 'POST', body: JSON.stringify(req) }),
 };

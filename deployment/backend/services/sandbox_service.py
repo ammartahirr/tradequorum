@@ -43,6 +43,8 @@ class SandboxRequest:
     initial_capital: float = 100000.0
     commission_pct: float = 0.001
     slippage_pct: float = 0.0005
+    engine: str = "quant"
+    quant: Optional[dict] = None  # QuantConfig overrides
 
 
 def candle_to_dict(c: OHLCV) -> dict:
@@ -68,11 +70,38 @@ def _run_in_thread(bt: Backtester, symbol: str, candles: list[OHLCV], horizon: T
     return asyncio.run(bt.run_backtest(symbol, candles, horizon))
 
 
+async def run_quant(req: SandboxRequest, symbol: str, source: str, candles: list[OHLCV], started: float) -> dict:
+    from services.quant_service import quant_config
+    from src.quant import QuantEngine
+
+    overrides = dict(req.quant or {})
+    overrides.setdefault("initial_capital", req.initial_capital)
+    overrides.setdefault("allow_short", req.allow_short)
+    overrides.setdefault("max_hold_bars", req.max_hold_bars)
+    cfg = quant_config(**overrides)
+    if len(candles) < cfg.warmup_bars + 100:
+        raise ValueError(
+            f"Only {len(candles)} {req.timeframe} candles for {symbol} from '{source}'; "
+            f"the quant engine needs at least {cfg.warmup_bars + 100}."
+        )
+    async with _sem():
+        res = await asyncio.to_thread(QuantEngine(cfg).backtest, symbol, candles)
+    res.update(
+        timeframe=req.timeframe, source=source, bars=len(candles), warmup_bars=cfg.warmup_bars,
+        first_bar=candles[0].timestamp.isoformat(), last_bar=candles[-1].timestamp.isoformat(),
+        candles=[candle_to_dict(c) for c in candles],
+        elapsed_ms=int((time.perf_counter() - started) * 1000),
+    )
+    return res
+
+
 async def run_sandbox(req: SandboxRequest) -> dict:
     symbol = req.symbol.upper()
     source = (req.source or settings.DEFAULT_DATA_SOURCE).lower()
     started = time.perf_counter()
     candles = await fetch_candles(symbol, req.timeframe, req.bars, source)
+    if req.engine == "quant":
+        return await run_quant(req, symbol, source, candles, started)
 
     cfg = BacktestConfig(
         initial_capital=req.initial_capital,
@@ -111,6 +140,7 @@ async def run_sandbox(req: SandboxRequest) -> dict:
     skipped = details.pop("skipped_signals", [])
 
     return {
+        "engine": "classic",
         "symbol": symbol,
         "timeframe": req.timeframe,
         "source": source,

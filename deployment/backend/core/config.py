@@ -62,6 +62,17 @@ class Settings(BaseSettings):
     # Background jobs (news scraping, technical analysis, position monitoring)
     ENABLE_SCHEDULER: bool = True
 
+    # Strategy engine: "quant" (v2: regimes + alpha ensemble + risk sizing) or "classic" (v1 matrix)
+    STRATEGY_ENGINE: str = "quant"
+    QUANT_TIMEFRAME: str = "D1"
+    QUANT_HISTORY_BARS: int = 1500
+    QUANT_EVAL_INTERVAL_MINUTES: int = 60
+    QUANT_DECISION_TTL_HOURS: int = 24
+    QUANT_USE_META_MODEL: bool = False  # enable only after it shows OOS skill in the sandbox
+    QUANT_ALLOW_SHORT: bool = True
+    QUANT_MAX_RISK_PER_TRADE: float = 0.01
+    QUANT_BASE_RISK: float = 0.005
+
     # MT5/Exness Trading (legacy, Windows only)
     MT5_LOGIN: str = ""
     MT5_PASSWORD: str = ""

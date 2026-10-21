@@ -13,7 +13,8 @@ An intelligent trading platform that trades through **Interactive Brokers** (pap
 ```
 src/
 ├── agents/          # Trading agents (News, Technical, Strategy, Risk)
-├── backtest/        # Training sandbox / backtester (replays history through the real agents)
+├── backtest/        # Classic v1 backtester (replays history through the original agents)
+├── quant/           # Quant engine v2: features, regimes, alpha ensemble, meta-model, risk, metrics
 ├── brokers/         # BrokerClient abstraction: IBKR (ib_async), PaperBroker, Yahoo/synthetic data
 ├── execution/       # Order executor, position manager
 ├── handlers/        # AWS Lambda handlers
@@ -25,6 +26,19 @@ tests/
 ├── property/        # Property-based tests (Hypothesis)
 └── integration/     # Integration tests
 ```
+
+## Quant engine v2 (`src/quant/`)
+
+The default strategy. Every step is causal: the decision is made at bar `t`'s close and the fill happens at `t+1`'s open.
+
+1. **Features** (`features.py`): multi-horizon log returns, realized and Parkinson volatility, vol-of-vol, volatility percentile, ATR, RSI(2/14), MACD histogram in ATR units, Bollinger %B and squeeze, MA distances and slopes, ADX, Kaufman efficiency, Donchian position, volume z-score, rolling skew/kurtosis/autocorrelation.
+2. **Regimes** (`regime.py`): trend_up, trend_down, range, transition and crisis. These come from ADX, efficiency ratio, Lo–MacKinlay variance ratio and the volatility percentile.
+3. **Alpha ensemble** (`alphas.py`): vol-scaled time-series momentum, MA-spread trend, Donchian breakout after a volatility squeeze, and trend-aligned mean reversion. Weights are a regime prior multiplied by each alpha's own recent risk-adjusted P&L (EW Sharpe). News sentiment enters as a fifth alpha when available.
+4. **Risk** (`engine.py`): ATR stop and target, move to breakeven after 1 ATR, chandelier trailing stop, exit on signal flip, time stop. Each trade risks a fixed fraction of equity, notional is capped by volatility targeting, and a drawdown throttle cuts risk, then stops trading. A 200-bar trend filter and a cost-to-edge filter are applied.
+5. **ML meta-labeling** (`meta_model.py`, optional): triple-barrier labels feed a gradient-boosting plus logistic ensemble, trained walk-forward with purging and an embargo. It predicts P(win) and sizes trades with fractional Kelly, but only after it has earned trust (out-of-sample AUC ≥ 0.55 on ≥ 50 past trades).
+6. **Validation**: Sharpe, Sortino, Calmar, Probabilistic Sharpe Ratio, a 1,000-run Monte Carlo of trade order, per-regime stats, alpha health, ML-vs-no-ML comparison, and a multi-symbol portfolio backtest (`POST /api/sandbox/portfolio`).
+
+Live: `GET /api/quant/decision/{symbol}` returns the regime, alpha mix, P(win), size, SL/TP and reasons. With `STRATEGY_ENGINE=quant` the scheduler stores these as trade decisions every `QUANT_EVAL_INTERVAL_MINUTES`.
 
 ## Training sandbox
 

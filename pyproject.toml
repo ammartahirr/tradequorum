@@ -34,6 +34,9 @@ dependencies = [
     # Data validation
     "pydantic>=2.5.0",
 
+    # Quant engine meta-model
+    "scikit-learn>=1.4",
+
     # Brokers / market data
     "ib_async>=2.1.0",   # Interactive Brokers (TWS / IB Gateway)
     "yfinance>=0.2.40",  # free historical data for the sandbox
