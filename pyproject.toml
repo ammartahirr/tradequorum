@@ -1,0 +1,102 @@
+[build-system]
+requires = ["setuptools>=61.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "ai-trading-system"
+version = "0.1.0"
+description = "AI-powered multi-agent trading platform with News, Technical, and Strategy agents"
+readme = "README.md"
+requires-python = ">=3.11"
+license = {text = "MIT"}
+authors = [
+    {name = "AI Trading Team"}
+]
+keywords = ["trading", "ai", "agents", "mt5", "exness"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Financial and Insurance Industry",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+]
+
+dependencies = [
+    # AWS SDK
+    "boto3>=1.34.0",
+    
+    # Async HTTP client
+    "aiohttp>=3.9.0",
+    
+    # Data processing
+    "pandas>=2.1.0",
+    "numpy>=1.26.0",
+    
+    # Technical analysis
+    "TA-Lib>=0.4.28",
+    
+    # MetaTrader 5 API
+    "MetaTrader5>=5.0.45",
+    
+    # Data validation
+    "pydantic>=2.5.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    # Testing
+    "pytest>=7.4.0",
+    "pytest-asyncio>=0.23.0",
+    "pytest-cov>=4.1.0",
+    "hypothesis>=6.92.0",
+    
+    # Mocking
+    "moto>=4.2.0",
+    "pytest-mock>=3.12.0",
+    
+    # Linting and formatting
+    "ruff>=0.1.0",
+    "mypy>=1.7.0",
+    
+    # Type stubs
+    "boto3-stubs[dynamodb,secretsmanager,sagemaker]>=1.34.0",
+    "pandas-stubs>=2.1.0",
+]
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["src*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+asyncio_mode = "auto"
+addopts = "-v --tb=short"
+markers = [
+    "unit: Unit tests",
+    "integration: Integration tests",
+    "property: Property-based tests",
+]
+
+[tool.ruff]
+target-version = "py311"
+line-length = 100
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "N", "W", "UP"]
+ignore = ["E501"]
+
+[tool.mypy]
+python_version = "3.11"
+strict = true
+warn_return_any = true
+warn_unused_ignores = true
+
+[tool.coverage.run]
+source = ["src"]
+branch = true
+
+[tool.coverage.report]
+exclude_lines = [
+    "pragma: no cover",
+    "if TYPE_CHECKING:",
+    "raise NotImplementedError",
+]
