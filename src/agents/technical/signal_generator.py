@@ -438,9 +438,13 @@ class TechnicalSignalGenerator:
         symbol: str,
         candles: list[OHLCV],
         interest_rate_impact: float = 0.0,
+        as_of: Optional[datetime] = None,
     ) -> TechnicalSignal:
         """
         Generate a TechnicalSignal from market data.
+
+        ``as_of`` stamps the signal with a historical time (used by the
+        backtester / sandbox). Defaults to now for live trading.
         
         Requirements:
         - 2.8: Generate TechnicalSignal with all required fields
@@ -463,7 +467,7 @@ class TechnicalSignalGenerator:
             )
         
         current_price = candles[-1].close
-        timestamp = datetime.now(timezone.utc)
+        timestamp = as_of or datetime.now(timezone.utc)
         
         # Calculate RSI
         rsi = calculate_rsi(candles, period=14)

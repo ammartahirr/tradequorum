@@ -1,35 +1,30 @@
-# Backend Dockerfile for AI Trading System
+# Backend image. Build context = repository root:
+#   docker build -f deployment/Dockerfile.backend .
 FROM python:3.11-slim
 
 WORKDIR /app
 
-# Install system dependencies
-RUN apt-get update && apt-get install -y \
-    gcc \
-    libpq-dev \
-    curl \
+RUN apt-get update && apt-get install -y --no-install-recommends \
+        gcc \
+        libpq-dev \
+        curl \
     && rm -rf /var/lib/apt/lists/*
 
-# Copy requirements first for caching
-COPY backend/requirements.txt .
+COPY deployment/backend/requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
-# Copy backend code
-COPY backend/ .
+# Shared trading engine (agents, backtester, brokers) + API server
+COPY src/ ./src/
+COPY deployment/backend/ .
 
-# Copy existing source code (mounted as volume in docker-compose)
-# The src/ directory will be mounted at runtime
-
-# Create non-root user
 RUN useradd -m -u 1000 trading && chown -R trading:trading /app
 USER trading
 
-# Expose port
 EXPOSE 8000
 
-# Health check
-HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
+HEALTHCHECK --interval=30s --timeout=10s --start-period=20s --retries=3 \
     CMD curl -f http://localhost:8000/api/health || exit 1
 
-# Run with uvicorn
-CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8000", "--workers", "4"]
+# Single worker on purpose: the scheduler, WebSocket registry and IB Gateway
+# socket are in-process state. Scale with more containers, not more workers.
+CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8000", "--workers", "1", "--proxy-headers"]

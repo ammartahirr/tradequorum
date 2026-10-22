@@ -1,34 +1,23 @@
-# Frontend Dockerfile for AI Trading Dashboard
+# Build context = repository root.
+# Dashboard: build with Vite, serve with nginx (also reverse-proxies /api and /ws)
 FROM node:20-alpine AS builder
 
 WORKDIR /app
-
-# Copy package files
-COPY package*.json ./
-
-# Install dependencies
+COPY dashboard/package*.json ./
 RUN npm ci
 
-# Copy source code
-COPY . .
+COPY dashboard/ .
 
-# Build arguments for environment
+# Relative URLs work behind the bundled nginx; override for a separate API host
 ARG VITE_API_URL=/api
 ARG VITE_WS_URL=/ws
-
 ENV VITE_API_URL=$VITE_API_URL
 ENV VITE_WS_URL=$VITE_WS_URL
 
-# Build the application
 RUN npm run build
 
-# Production stage - just copy built files
-FROM alpine:latest
-
-WORKDIR /app
-
-# Copy built files
-COPY --from=builder /app/dist ./dist
-
-# The dist folder will be mounted as a volume for nginx
-CMD ["sh", "-c", "cp -r /app/dist/* /output/ 2>/dev/null || true && tail -f /dev/null"]
+FROM nginx:alpine
+COPY --from=builder /app/dist /usr/share/nginx/html
+COPY deployment/nginx/nginx.conf /etc/nginx/nginx.conf
+COPY deployment/nginx/conf.d/ /etc/nginx/conf.d/
+EXPOSE 80 443

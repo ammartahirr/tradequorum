@@ -95,36 +95,33 @@ class ConnectionManager:
             self.disconnect(websocket)
 
 
-# Global connection manager instance
+# Global connection manager instance (also used by main.py's /ws endpoint)
 manager = ConnectionManager()
+
+
+def _envelope(msg_type: str, data: dict) -> dict:
+    return {
+        "type": msg_type,
+        "payload": data,
+        "data": data,  # legacy key
+        "timestamp": datetime.utcnow().isoformat(),
+    }
 
 
 async def broadcast_trade_update(trade_data: dict):
     """Broadcast a trade update to all clients."""
-    await manager.broadcast({
-        "type": "trade_update",
-        "data": trade_data,
-        "timestamp": datetime.utcnow().isoformat(),
-    })
+    await manager.broadcast(_envelope("trade_executed", trade_data))
 
 
 async def broadcast_position_update(position_data: dict):
     """Broadcast a position update to all clients."""
-    await manager.broadcast({
-        "type": "position_update",
-        "data": position_data,
-        "timestamp": datetime.utcnow().isoformat(),
-    })
+    await manager.broadcast(_envelope("position_update", position_data))
 
 
 async def broadcast_signal(signal_type: str, signal_data: dict):
     """Broadcast a new signal to all clients."""
     symbol = signal_data.get("symbol")
-    message = {
-        "type": f"{signal_type}_signal",
-        "data": signal_data,
-        "timestamp": datetime.utcnow().isoformat(),
-    }
+    message = _envelope(f"{signal_type}_signal", signal_data)
     
     # Broadcast to all and to symbol subscribers
     await manager.broadcast(message)
@@ -132,17 +129,9 @@ async def broadcast_signal(signal_type: str, signal_data: dict):
 
 async def broadcast_risk_alert(alert_data: dict):
     """Broadcast a risk alert to all clients."""
-    await manager.broadcast({
-        "type": "risk_alert",
-        "data": alert_data,
-        "timestamp": datetime.utcnow().isoformat(),
-    })
+    await manager.broadcast(_envelope("risk_alert", alert_data))
 
 
 async def broadcast_decision(decision_data: dict):
     """Broadcast a trade decision to all clients."""
-    await manager.broadcast({
-        "type": "trade_decision",
-        "data": decision_data,
-        "timestamp": datetime.utcnow().isoformat(),
-    })
+    await manager.broadcast(_envelope("trade_signal", decision_data))

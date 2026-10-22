@@ -3,7 +3,7 @@
 from datetime import datetime
 from typing import Optional
 
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field, field_validator, model_validator
 
 from .enums import ImpactType, MarketCondition, Sentiment, TrendDirection
 
@@ -65,6 +65,13 @@ class OHLCV(BaseModel):
         if info.data.get("high") is not None and v > info.data["high"]:
             raise ValueError("low must be <= high")
         return v
+
+    @model_validator(mode="after")
+    def close_within_range(self) -> "OHLCV":
+        """Validate low <= close <= high (field validators run before close is set)."""
+        if not (self.low <= self.close <= self.high):
+            raise ValueError("close must be between low and high")
+        return self
 
 
 class SupportResistance(BaseModel):

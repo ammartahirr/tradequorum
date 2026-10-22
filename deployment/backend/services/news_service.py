@@ -23,8 +23,8 @@ class NewsService:
         self.bedrock_client = boto3.client(
             "bedrock-runtime",
             region_name=settings.AWS_REGION,
-            aws_access_key_id=settings.AWS_ACCESS_KEY_ID,
-            aws_secret_access_key=settings.AWS_SECRET_ACCESS_KEY,
+            aws_access_key_id=settings.AWS_ACCESS_KEY_ID or None,
+            aws_secret_access_key=settings.AWS_SECRET_ACCESS_KEY or None,
             config=Config(
                 retries={"max_attempts": 3, "mode": "adaptive"},
                 connect_timeout=5,
@@ -33,36 +33,55 @@ class NewsService:
         )
     
     async def scrape_and_analyze_news(self) -> int:
-        """Scrape news from sources and analyze them."""
-        # Import existing scrapers from src
+        """Scrape configured news sources for tracked symbols and analyze each item."""
         from src.agents.news.scrapers import (
-            scrape_reuters,
-            scrape_bloomberg,
-            scrape_sec_edgar,
-            scrape_twitter,
+            BloombergScraper,
+            NewsScraperManager,
+            ReutersScraper,
+            SECEdgarScraper,
+            TwitterScraper,
         )
-        
+
+        scrapers = [SECEdgarScraper(user_agent=settings.SEC_EDGAR_USER_AGENT)]
+        if settings.REUTERS_API_KEY:
+            scrapers.append(ReutersScraper(api_key=settings.REUTERS_API_KEY))
+        if settings.BLOOMBERG_API_KEY:
+            scrapers.append(BloombergScraper(api_key=settings.BLOOMBERG_API_KEY))
+        if settings.TWITTER_BEARER_TOKEN:
+            scrapers.append(TwitterScraper(
+                api_key=settings.TWITTER_API_KEY,
+                api_secret=settings.TWITTER_API_SECRET,
+                bearer_token=settings.TWITTER_BEARER_TOKEN,
+            ))
+        manager = NewsScraperManager(scrapers)
+
+        # SEC EDGAR / news APIs only make sense for equities
+        from src.brokers.symbols import parse_symbol
+        symbols = [s for s in settings.trading_symbols_list if parse_symbol(s).asset_class == "stock"]
+        if not symbols:
+            return 0
+
         count = 0
-        
-        # Scrape from all sources
-        for scraper in [scrape_reuters, scrape_bloomberg, scrape_sec_edgar, scrape_twitter]:
+        try:
+            items = await manager.scrape_all(symbols)
+        finally:
+            await manager.close_all()
+
+        for item in items:
             try:
-                news_items = await scraper()
-                for item in news_items:
-                    signal = await self.analyze_single_news(
-                        headline=item.headline,
-                        content=item.content,
-                        symbols=item.symbols,
-                        source=item.source,
-                        url=item.url,
-                    )
-                    if signal:
-                        count += 1
+                signal = await self.analyze_single_news(
+                    headline=item.headline,
+                    content=item.content,
+                    symbols=item.symbols,
+                    source=item.source,
+                    url=item.url,
+                )
+                if signal:
+                    count += 1
             except Exception as e:
-                logger.error(f"Error scraping from {scraper.__name__}: {e}")
-        
+                logger.error(f"Error analyzing news item '{item.headline[:60]}': {e}")
         return count
-    
+
     async def analyze_single_news(
         self,
         headline: str,
@@ -134,6 +153,7 @@ Provide your analysis in JSON format:
         }.get(analysis["impact_type"], 24)
         
         # Create and persist signal
+        signal = None  # stays None if the item has no symbols
         async with get_db_context() as db:
             for symbol in symbols:
                 signal = NewsSignal(

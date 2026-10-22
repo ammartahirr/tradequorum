@@ -51,8 +51,8 @@ class IndicatorsResponse(BaseModel):
     rsi: float
     macd: dict
     bollinger: dict
-    ma_50: float
-    ma_200: float
+    ma_50: Optional[float] = None
+    ma_200: Optional[float] = None
     current_price: float
     timestamp: datetime
 

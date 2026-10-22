@@ -2,12 +2,14 @@ import { useTheme } from '../context/ThemeContext';
 import { useLiveClock } from '../hooks/useLiveClock';
 import { ConnectionStatus } from './ConnectionStatus';
 import { labelStyle, fontSize, spacing, radius } from '../styles/shared';
+import type { ReactNode } from 'react';
 import type { ConnectionStatus as ConnectionStatusType } from '../hooks/useWebSocket';
 
 interface HeaderProps {
   connectionStatus: ConnectionStatusType;
   onReconnect: () => void;
   lastUpdateTime: number | null;
+  nav?: ReactNode;
 }
 
 function ThemeToggle() {
@@ -28,7 +30,7 @@ function ThemeToggle() {
   );
 }
 
-export function Header({ connectionStatus, onReconnect, lastUpdateTime }: HeaderProps) {
+export function Header({ connectionStatus, onReconnect, lastUpdateTime, nav }: HeaderProps) {
   const { colors } = useTheme();
   const { timeString, dateString } = useLiveClock();
   const isConnected = connectionStatus === 'connected';
@@ -50,6 +52,7 @@ export function Header({ connectionStatus, onReconnect, lastUpdateTime }: Header
           <div style={{ width: '8px', height: '8px', borderRadius: '50%', backgroundColor: 'currentColor', animation: isConnected ? 'pulse 2s infinite' : 'none' }} />
           {isConnected ? 'LIVE' : 'OFFLINE'}
         </div>
+        {nav}
       </div>
       <div style={{ textAlign: 'center' }}>
         <div style={{ fontSize: fontSize.h2, fontWeight: 800, fontFamily: 'var(--font-mono)', color: colors.textPrimary, letterSpacing: '-0.02em' }}>{timeString}</div>

@@ -117,6 +117,8 @@ async def evaluate_signals(
         technical_signal_id=request.technical_signal_id,
         horizon=request.horizon,
     )
+    if decision is None:
+        raise HTTPException(status_code=422, detail="Signals did not produce an actionable trade")
     return decision
 
 

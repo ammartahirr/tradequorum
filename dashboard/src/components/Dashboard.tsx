@@ -13,9 +13,10 @@ import { LivePositionsGrid } from './LivePositionCard';
 import { MarketSentiment } from './MarketSentiment';
 import { TradingStats } from './TradingStats';
 import { SystemHealth } from './SystemHealth';
+import type { ReactNode } from 'react';
 import { spacing, fontSize } from '../styles/shared';
 
-export function Dashboard() {
+export function Dashboard({ nav }: { nav?: ReactNode } = {}) {
   const { state, reconnect } = useTradingContext();
   const { colors } = useTheme();
   const sectionGap = spacing.xxxl; // 32px between major sections
@@ -23,7 +24,7 @@ export function Dashboard() {
 
   return (
     <div style={{ minHeight: '100vh', backgroundColor: colors.bgPrimary, color: colors.textPrimary, transition: 'background-color 250ms ease, color 250ms ease' }}>
-      <Header connectionStatus={state.connectionStatus} onReconnect={reconnect} lastUpdateTime={state.lastUpdateTime} />
+      <Header connectionStatus={state.connectionStatus} onReconnect={reconnect} lastUpdateTime={state.lastUpdateTime} nav={nav} />
 
       <main style={{ padding: spacing.xxl, maxWidth: '1920px', margin: '0 auto' }}>
         <div style={{ display: 'grid', gridTemplateColumns: '2fr 1fr', gap: gridGap, marginBottom: sectionGap }}>

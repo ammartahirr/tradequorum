@@ -22,6 +22,7 @@ import boto3
 
 from src.agents.technical.signal_generator import TechnicalSignalGenerator
 from src.agents.technical.market_data import MarketDataFetcher, is_data_stale
+from src.agents.technical.config import MT5Config
 from src.agents.technical.mt5_client import MT5Client
 
 # Configure logging
@@ -146,12 +147,9 @@ async def run_technical_analysis(symbols: List[str]) -> Dict[str, Any]:
         Analysis results
     """
     # Initialize components
-    credentials = get_mt5_credentials()
-    mt5_client = MT5Client(
-        login=credentials.get("login"),
-        password=credentials.get("password"),
-        server=credentials.get("server"),
-    )
+    # MT5Client loads {server, login, password} from Secrets Manager itself
+    mt5_config = MT5Config(credentials_secret_name=MT5_SECRETS_ARN) if MT5_SECRETS_ARN else None
+    mt5_client = MT5Client(config=mt5_config)
     
     signal_generator = TechnicalSignalGenerator(
         table_name=TECHNICAL_SIGNALS_TABLE,

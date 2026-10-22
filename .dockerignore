@@ -1,0 +1,9 @@
+.git
+**/node_modules
+**/dist
+**/__pycache__
+**/.pytest_cache
+**/.hypothesis
+.venv
+**/.env
+infrastructure/cdk.out

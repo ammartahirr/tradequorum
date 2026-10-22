@@ -252,7 +252,8 @@ def detect_confluence(
         logger.warning(f"Bollinger Bands calculation failed: {e}")
     
     # Calculate confluence score
-    score = len(factors) / TOTAL_CONFLUENCE_FACTORS
+    # Up to 13 factors can fire (S/R is per-timeframe), so clamp to the model's [0, 1] range
+    score = min(1.0, len(factors) / TOTAL_CONFLUENCE_FACTORS)
     
     # Build description
     description = f"Confluence: {len(factors)}/{TOTAL_CONFLUENCE_FACTORS} factors aligned"

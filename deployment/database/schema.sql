@@ -17,44 +17,8 @@ CREATE SCHEMA IF NOT EXISTS aitrading;
 SET search_path TO aitrading, public;
 
 -- ============================================================
--- ENUM TYPES
+-- ENUM-LIKE COLUMNS are VARCHAR + CHECK (SQLAlchemy binds them as VARCHAR)
 -- ============================================================
-
-CREATE TYPE aitrading.sentiment_type AS ENUM (
-    'very_bullish', 'bullish', 'neutral', 'bearish', 'very_bearish'
-);
-
-CREATE TYPE aitrading.impact_type AS ENUM (
-    'cash_flow', 'hype', 'regulatory', 'macro'
-);
-
-CREATE TYPE aitrading.trend_direction AS ENUM (
-    'strong_uptrend', 'uptrend', 'sideways', 'downtrend', 'strong_downtrend'
-);
-
-CREATE TYPE aitrading.market_condition AS ENUM (
-    'oversold', 'neutral', 'overbought'
-);
-
-CREATE TYPE aitrading.trade_action AS ENUM (
-    'strong_buy', 'buy', 'wait_pullback', 'hold', 'sell', 'strong_sell', 'no_trade'
-);
-
-CREATE TYPE aitrading.trading_horizon AS ENUM (
-    'short_term', 'medium_term', 'long_term'
-);
-
-CREATE TYPE aitrading.conviction_level AS ENUM (
-    'high', 'medium', 'low'
-);
-
-CREATE TYPE aitrading.trade_status AS ENUM (
-    'open', 'closed_profit', 'closed_loss', 'closed_sl', 'closed_tp'
-);
-
-CREATE TYPE aitrading.order_status AS ENUM (
-    'filled', 'partial', 'rejected', 'pending'
-);
 
 -- ============================================================
 -- NEWS SIGNALS TABLE (Requirement 9.1)
@@ -63,8 +27,8 @@ CREATE TYPE aitrading.order_status AS ENUM (
 CREATE TABLE aitrading.news_signals (
     signal_id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
     symbol VARCHAR(20) NOT NULL,
-    sentiment aitrading.sentiment_type NOT NULL,
-    impact_type aitrading.impact_type NOT NULL,
+    sentiment VARCHAR(20) NOT NULL CHECK (sentiment IN ('very_bullish', 'bullish', 'neutral', 'bearish', 'very_bearish')),
+    impact_type VARCHAR(20) NOT NULL CHECK (impact_type IN ('cash_flow', 'hype', 'regulatory', 'macro')),
     impact_score DECIMAL(3,2) NOT NULL CHECK (impact_score >= 0 AND impact_score <= 1),
     confidence DECIMAL(3,2) NOT NULL CHECK (confidence >= 0 AND confidence <= 1),
     reasoning TEXT NOT NULL,
@@ -88,8 +52,8 @@ CREATE INDEX idx_news_signals_expires ON aitrading.news_signals(expires_at);
 CREATE TABLE aitrading.technical_signals (
     signal_id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
     symbol VARCHAR(20) NOT NULL,
-    trend aitrading.trend_direction NOT NULL,
-    condition aitrading.market_condition NOT NULL,
+    trend VARCHAR(20) NOT NULL CHECK (trend IN ('strong_uptrend', 'uptrend', 'sideways', 'downtrend', 'strong_downtrend')),
+    condition VARCHAR(20) NOT NULL CHECK (condition IN ('oversold', 'neutral', 'overbought')),
     rsi DECIMAL(5,2) NOT NULL CHECK (rsi >= 0 AND rsi <= 100),
     current_price DECIMAL(18,8) NOT NULL CHECK (current_price > 0),
     support_levels JSONB NOT NULL DEFAULT '[]',
@@ -116,9 +80,9 @@ CREATE INDEX idx_technical_signals_timestamp ON aitrading.technical_signals(time
 CREATE TABLE aitrading.trade_decisions (
     decision_id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
     symbol VARCHAR(20) NOT NULL,
-    action aitrading.trade_action NOT NULL,
-    conviction aitrading.conviction_level NOT NULL,
-    horizon aitrading.trading_horizon NOT NULL,
+    action VARCHAR(20) NOT NULL CHECK (action IN ('strong_buy', 'buy', 'wait_pullback', 'hold', 'sell', 'strong_sell', 'no_trade')),
+    conviction VARCHAR(20) NOT NULL CHECK (conviction IN ('high', 'medium', 'low')),
+    horizon VARCHAR(20) NOT NULL CHECK (horizon IN ('short_term', 'medium_term', 'long_term')),
     entry_price DECIMAL(18,8) NOT NULL CHECK (entry_price > 0),
     stop_loss DECIMAL(18,8) NOT NULL CHECK (stop_loss > 0),
     take_profit DECIMAL(18,8) NOT NULL CHECK (take_profit > 0),
@@ -142,17 +106,17 @@ CREATE INDEX idx_trade_decisions_timestamp ON aitrading.trade_decisions(timestam
 CREATE TABLE aitrading.trade_records (
     trade_id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
     symbol VARCHAR(20) NOT NULL,
-    action aitrading.trade_action NOT NULL,
-    horizon aitrading.trading_horizon NOT NULL,
+    action VARCHAR(20) NOT NULL CHECK (action IN ('strong_buy', 'buy', 'wait_pullback', 'hold', 'sell', 'strong_sell', 'no_trade')),
+    horizon VARCHAR(20) NOT NULL CHECK (horizon IN ('short_term', 'medium_term', 'long_term')),
     entry_price DECIMAL(18,8) NOT NULL CHECK (entry_price > 0),
     exit_price DECIMAL(18,8) CHECK (exit_price > 0),
     stop_loss DECIMAL(18,8) NOT NULL CHECK (stop_loss > 0),
     take_profit DECIMAL(18,8) NOT NULL CHECK (take_profit > 0),
     position_size DECIMAL(18,8) NOT NULL CHECK (position_size > 0),
-    status aitrading.trade_status NOT NULL DEFAULT 'open',
+    status VARCHAR(20) NOT NULL DEFAULT 'open' CHECK (status IN ('open', 'closed_profit', 'closed_loss', 'closed_sl', 'closed_tp')),
     pnl DECIMAL(18,8),
     pnl_pct DECIMAL(8,4),
-    conviction aitrading.conviction_level NOT NULL,
+    conviction VARCHAR(20) NOT NULL CHECK (conviction IN ('high', 'medium', 'low')),
     news_signal_id UUID REFERENCES aitrading.news_signals(signal_id),
     technical_signal_id UUID REFERENCES aitrading.technical_signals(signal_id),
     decision_id UUID REFERENCES aitrading.trade_decisions(decision_id),
@@ -177,7 +141,7 @@ CREATE TABLE aitrading.order_results (
     order_id VARCHAR(100) NOT NULL UNIQUE,
     trade_id UUID REFERENCES aitrading.trade_records(trade_id),
     symbol VARCHAR(20) NOT NULL,
-    status aitrading.order_status NOT NULL,
+    status VARCHAR(20) NOT NULL CHECK (status IN ('filled', 'partial', 'rejected', 'pending')),
     filled_price DECIMAL(18,8) NOT NULL CHECK (filled_price >= 0),
     filled_quantity DECIMAL(18,8) NOT NULL CHECK (filled_quantity >= 0),
     timestamp TIMESTAMPTZ NOT NULL DEFAULT NOW(),

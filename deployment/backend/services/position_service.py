@@ -75,6 +75,16 @@ class PositionService:
         position.pnl_pct = pnl_pct
         position.closed_at = datetime.utcnow()
         
+        from services.broker_service import get_broker
+        broker = get_broker()
+        if broker.name == "paper" or status in {"closed_profit", "closed_loss"}:
+            # Manual closes (and all paper-sim closes) must flatten at the broker;
+            # on IBKR the attached bracket SL/TP orders handle closed_sl / closed_tp.
+            try:
+                await broker.close_position(position.symbol)
+            except Exception as e:
+                logger.warning(f"Broker close for {position.symbol} failed: {e}")
+
         # Update daily loss tracking if loss
         if pnl < 0:
             await self._update_daily_loss(abs(pnl), db)
@@ -92,18 +102,17 @@ class PositionService:
         })
     
     async def _get_current_price(self, symbol: str) -> Optional[float]:
-        """Get current price for a symbol."""
+        """Current mid price from the configured broker (None if unavailable)."""
+        from services.broker_service import get_broker
+
         try:
-            import MetaTrader5 as mt5
-            
-            tick = mt5.symbol_info_tick(symbol)
-            if tick:
-                return (tick.bid + tick.ask) / 2
+            broker = get_broker()
+            await broker.ensure_connected()
+            quote = await broker.get_current_price(symbol)
+            return float(quote["mid"]) if quote else None
+        except Exception as e:
+            logger.warning(f"Price unavailable for {symbol}: {e}")
             return None
-            
-        except ImportError:
-            # Mock price for development
-            return 150.0
     
     async def _update_daily_loss(self, loss: float, db):
         """Update daily loss tracking."""

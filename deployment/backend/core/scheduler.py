@@ -47,6 +47,11 @@ async def strategy_evaluation_job():
     
     logger.info(f"Running strategy evaluation job at {datetime.utcnow()}")
     try:
+        if settings.STRATEGY_ENGINE.lower() == "quant":
+            from services.quant_service import evaluate_and_store
+            stored = await evaluate_and_store()
+            logger.info(f"Quant engine stored {stored} new trade decision(s)")
+            return
         service = StrategyService()
         await service.evaluate_pending_signals()
     except Exception as e:
@@ -88,7 +93,8 @@ async def start_scheduler():
     # Strategy evaluation every minute
     scheduler.add_job(
         strategy_evaluation_job,
-        IntervalTrigger(minutes=1),
+        IntervalTrigger(minutes=settings.QUANT_EVAL_INTERVAL_MINUTES
+                        if settings.STRATEGY_ENGINE.lower() == "quant" else 1),
         id="strategy_evaluation",
         name="Strategy Evaluation",
         replace_existing=True,

@@ -35,7 +35,32 @@ async def init_db():
     async with engine.begin() as conn:
         # Create the aitrading schema if it doesn't exist
         await conn.execute(text("CREATE SCHEMA IF NOT EXISTS aitrading"))
-        await conn.commit()
+
+
+async def seed_admin_user():
+    """Create the admin user from ADMIN_EMAIL / ADMIN_PASSWORD if it does not exist."""
+    import logging
+    from sqlalchemy import select
+
+    from models.user import User
+    from api.routes.auth import get_password_hash
+
+    log = logging.getLogger(__name__)
+    if not settings.ADMIN_PASSWORD or settings.ADMIN_PASSWORD == "change_this_secure_password":
+        log.warning("ADMIN_PASSWORD not set – skipping admin user seeding")
+        return
+    async with async_session_maker() as session:
+        existing = await session.execute(select(User).where(User.email == settings.ADMIN_EMAIL))
+        if existing.scalar_one_or_none():
+            return
+        session.add(User(
+            email=settings.ADMIN_EMAIL,
+            password_hash=get_password_hash(settings.ADMIN_PASSWORD),
+            full_name="Administrator",
+            role="admin",
+        ))
+        await session.commit()
+        log.info(f"Seeded admin user {settings.ADMIN_EMAIL}")
 
 
 async def close_db():

@@ -169,11 +169,17 @@ export type WebSocketMessageType =
   | 'agent_status'
   | 'performance_update'
   | 'connection_status'
-  | 'error';
+  | 'error'
+  | 'pong'
+  | 'news_signal'
+  | 'technical_signal'
+  | 'risk_alert';
 
 export interface WebSocketMessage {
   type: WebSocketMessageType;
   payload: unknown;
+  /** legacy backend key – normalised into payload */
+  data?: unknown;
   timestamp: string;
 }
 

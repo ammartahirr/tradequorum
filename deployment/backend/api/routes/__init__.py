@@ -8,6 +8,9 @@ from api.routes.orders import router as orders_router
 from api.routes.positions import router as positions_router
 from api.routes.signals import router as signals_router
 from api.routes.health import router as health_router
+from api.routes.broker import router as broker_router
+from api.routes.sandbox import router as sandbox_router
+from api.routes.quant import router as quant_router
 
 __all__ = [
     "auth_router",
@@ -19,4 +22,7 @@ __all__ = [
     "positions_router",
     "signals_router",
     "health_router",
+    "broker_router",
+    "sandbox_router",
+    "quant_router",
 ]
